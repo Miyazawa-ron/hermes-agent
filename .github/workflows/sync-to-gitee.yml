@@ -1,0 +1,55 @@
+name: Sync to Gitee Mirror
+
+on:
+  schedule:
+    # 每天北京时间 8:00 自动同步
+    - cron: '0 0 * * *'
+  # 手动触发
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout upstream (NousResearch/hermes-agent)
+        uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: main
+          fetch-depth: 0
+
+      - name: Push to Gitee mirror
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          git remote add gitee https://miyazawaron:${GITEE_TOKEN}@gitee.com/miyazawaron/hermes-agent.git
+          git push --force --all gitee
+          git push --force --tags gitee
+          echo "✅ Sync to Gitee complete: $(date '+%Y-%m-%d %H:%M:%S')"
+
+  # GitHub 会在仓库连续 60 天没有 commit 后自动停用全部定时 workflow
+  # (state = disabled_inactivity)。本仓库是纯镜像，同步推的是 Gitee 而不是
+  # 这里，自身永远不会产生 commit —— 2026-08-27 就是这样被停掉的。
+  # 因此在接近上限时写一次心跳提交，重置这个计时器。
+  keepalive:
+    needs: sync
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Heartbeat if nearing the 60-day inactivity cutoff
+        run: |
+          age=$(( ( $(date +%s) - $(git log -1 --format=%ct) ) / 86400 ))
+          if [ "$age" -lt 45 ]; then
+            echo "最后一次 commit 在 ${age} 天前，距 60 天上限尚远，跳过"
+            exit 0
+          fi
+          date -u '+%Y-%m-%dT%H:%M:%SZ' > .github/last-sync.txt
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/last-sync.txt
+          git commit -m "chore: keepalive heartbeat (${age}d idle) [skip ci]"
+          git push
+          echo "✅ 心跳已提交，60 天计时器已重置"
