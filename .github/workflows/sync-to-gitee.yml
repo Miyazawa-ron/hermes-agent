@@ -27,6 +27,32 @@ jobs:
           git push --force --tags gitee
           echo "✅ Sync to Gitee complete: $(date '+%Y-%m-%d %H:%M:%S')"
 
+      # 上游 scripts/install.sh 把仓库地址写死成 github.com，且没有环境变量可以
+      # 覆盖，所以国内用户即使从 Gitee 取到脚本，脚本本身仍会 git clone GitHub
+      # 而卡住。这里在 main 之上额外发布一个 cn 分支，只改那两行为 Gitee 地址，
+      # 供国内全新安装使用：
+      #   curl -fsSL https://gitee.com/miyazawaron/hermes-agent/raw/cn/scripts/install.sh | bash
+      - name: Publish cn branch (installer pointed at the Gitee mirror)
+        run: |
+          git checkout -b cn
+          sed -i \
+            -e 's|git@github\.com:NousResearch/hermes-agent\.git|git@gitee.com:miyazawaron/hermes-agent.git|' \
+            -e 's|https://github\.com/NousResearch/hermes-agent\.git|https://gitee.com/miyazawaron/hermes-agent.git|' \
+            scripts/install.sh
+
+          # 上游若改了变量写法导致替换落空，宁可让这一步失败，
+          # 也不能发布一个仍然指向 GitHub 的"国内安装脚本"。
+          grep -q 'REPO_URL_SSH="git@gitee\.com:miyazawaron/hermes-agent\.git"'      scripts/install.sh
+          grep -q 'REPO_URL_HTTPS="https://gitee\.com/miyazawaron/hermes-agent\.git"' scripts/install.sh
+          ! grep -q 'NousResearch/hermes-agent' scripts/install.sh
+          bash -n scripts/install.sh
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "cn: point installer at the Gitee mirror"
+          git push --force gitee cn
+          echo "✅ cn 分支已发布"
+
   # GitHub 会在仓库连续 60 天没有 commit 后自动停用全部定时 workflow
   # (state = disabled_inactivity)。本仓库是纯镜像，同步推的是 Gitee 而不是
   # 这里，自身永远不会产生 commit —— 2026-08-27 就是这样被停掉的。
